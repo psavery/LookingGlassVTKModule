@@ -23,6 +23,7 @@
 #include "vtkTestUtilities.h"
 
 #include "vtkLookingGlassInterface.h"
+#include "vtkXLookingGlassRenderWindow.h"
 
 //------------------------------------------------------------------------------
 int TestDragon(int argc, char* argv[])
@@ -60,6 +61,13 @@ int TestDragon(int argc, char* argv[])
   renderer->GetActiveCamera()->SetViewAngle(30);
 
   int retVal = vtkRegressionTestImage(renderWindow);
+
+  renderWindow->Render();
+
+  auto* xrw = vtkXLookingGlassRenderWindow::SafeDownCast(renderWindow);
+  auto* interface = xrw->GetInterface();
+  interface->SaveQuilt(renderWindow, "example.png");
+
   if (retVal == vtkRegressionTester::DO_INTERACTOR)
   {
     iren->Start();

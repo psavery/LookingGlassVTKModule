@@ -844,27 +844,75 @@ void vtkLookingGlassInterface::RenderQuilt(vtkOpenGLRenderWindow* rw,
   }
 }
 
+class vtkEndRenderObserver : public vtkCommand
+{
+public:
+  static vtkEndRenderObserver* New() { return new vtkEndRenderObserver; }
+
+  void Execute(vtkObject* vtkNotUsed(caller), unsigned long vtkNotUsed(event),
+    void* vtkNotUsed(calldata)) override
+  {
+    if (!this->RenderWindow || !this->Interface || !this->CopyTexture)
+    {
+      return;
+    }
+
+    auto fb = this->RenderWindow->GetRenderFramebuffer();
+    this->RenderWindow->GetState()->PushFramebufferBindings();
+    fb->Bind(GL_DRAW_FRAMEBUFFER);
+    fb->ActivateDrawBuffer(0);
+
+    this->Interface->DrawLightField(this->RenderWindow, this->CopyTexture);
+    this->RenderWindow->GetState()->PopFramebufferBindings();
+  }
+
+  vtkOpenGLRenderWindow* RenderWindow = nullptr;
+  vtkLookingGlassInterface* Interface = nullptr;
+  vtkTextureObject* CopyTexture = nullptr;
+
+protected:
+  vtkEndRenderObserver() {}
+  ~vtkEndRenderObserver() override {}
+};
+
 void vtkLookingGlassInterface::SaveQuilt(vtkOpenGLRenderWindow* rw, const char* fileName)
 {
-  // Make a deep copy of the render window, render the quilt, and save it
-  vtkNew<vtkWindowToImageFilter> filter;
-  filter->ShouldRerenderOff();
-  filter->SetInput(rw);
+  vtkNew<vtkRenderWindow> rw2;
+  auto* saveQuiltRenWin = vtkOpenGLRenderWindow::SafeDownCast(rw2);
+  saveQuiltRenWin->OffScreenRenderingOn();
 
-  // Increase magnification to produce higher resolution images
-  // vtkWindowToImageFilter::SetScale() doesn't seem to do what we want...
+  // Increase display size to quilt size
   int prevDisplaySize[2] = { this->DisplaySize[0], this->DisplaySize[1] };
-
   this->DisplaySize[0] = this->QuiltTiles[0] * this->RenderSize[0];
   this->DisplaySize[1] = this->QuiltTiles[1] * this->RenderSize[1];
-  rw->SetSize(this->DisplaySize);
+  saveQuiltRenWin->SetSize(this->DisplaySize);
+
+  vtkNew<vtkTextureObject> obj;
+  obj->SetContext(saveQuiltRenWin);
+
+  vtkNew<vtkEndRenderObserver> endObserver;
+  endObserver->Interface = this;
+  endObserver->RenderWindow = saveQuiltRenWin;
+  endObserver->CopyTexture = obj;
+  saveQuiltRenWin->AddObserver(vtkCommand::RenderEvent, endObserver);
+
+  vtkNew<vtkWindowToImageFilter> filter;
+  filter->ShouldRerenderOff();
+  filter->SetInput(saveQuiltRenWin);
+
+  if (this->QuiltBlend)
+  {
+    // Ensure this is re-created
+    delete this->QuiltBlend;
+    this->QuiltBlend = nullptr;
+  }
 
   // Render once while saving the quilt. This will render the quilt image
   // on the render window. Then we will write out the image.
   // In ParaView, this will perform only the quad render via calling
   // DrawLightField(). It will not re-render the quilt images.
   this->SavingQuilt = true;
-  rw->Render();
+  saveQuiltRenWin->Render();
   this->SavingQuilt = false;
 
   vtkNew<vtkPNGWriter> writer;
@@ -872,13 +920,16 @@ void vtkLookingGlassInterface::SaveQuilt(vtkOpenGLRenderWindow* rw, const char* 
   writer->SetInputConnection(filter->GetOutputPort());
   writer->Write();
 
+  if (this->QuiltBlend)
+  {
+    // Ensure this is re-created
+    delete this->QuiltBlend;
+    this->QuiltBlend = nullptr;
+  }
+
   // Restore previous resolution settings
   this->DisplaySize[0] = prevDisplaySize[0];
   this->DisplaySize[1] = prevDisplaySize[1];
-  rw->SetSize(this->DisplaySize);
-
-  // Render again for the correct LG display.
-  rw->Render();
 }
 
 void vtkLookingGlassInterface::StartRecordingQuilt(vtkOpenGLRenderWindow* rw, const char* fileName)
