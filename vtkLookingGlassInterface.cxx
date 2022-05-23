@@ -723,6 +723,15 @@ void vtkLookingGlassInterface::GetTilePosition(int tile, int pos[2])
 void vtkLookingGlassInterface::RenderQuilt(vtkOpenGLRenderWindow* rw,
   vtkRendererCollection* renderers, std::function<void(void)>* renderFunc)
 {
+  if (this->SavingQuilt)
+  {
+    // If we are in the process of saving a quilt, we actually want to
+    // avoid re-rendering the quilt, and instead skip straight to the
+    // DrawLightField() function. Return here to avoid re-rendering the
+    // quilt.
+    return;
+  }
+
   if (!renderers)
   {
     // If no renderers are provided, default to all on the render window
@@ -855,9 +864,12 @@ void vtkLookingGlassInterface::SaveQuilt(vtkOpenGLRenderWindow* rw, const char* 
   // vtkWindowToImageFilter::SetScale() doesn't seem to do what we want...
   int prevDisplaySize[2] = { this->DisplaySize[0], this->DisplaySize[1] };
 
-  this->DisplaySize[0] = this->QuiltTiles[0] * this->RenderSize[0];
-  this->DisplaySize[1] = this->QuiltTiles[1] * this->RenderSize[1];
+  this->DisplaySize[0] = this->QuiltSize[0];
+  this->DisplaySize[1] = this->QuiltSize[1];
   rw->SetSize(this->DisplaySize);
+
+  auto prevOffScreenRendering = rw->GetOffScreenRendering();
+  rw->OffScreenRenderingOn();
 
   // Render once while saving the quilt. This will render the quilt image
   // on the render window. Then we will write out the image.
@@ -866,6 +878,8 @@ void vtkLookingGlassInterface::SaveQuilt(vtkOpenGLRenderWindow* rw, const char* 
   this->SavingQuilt = true;
   rw->Render();
   this->SavingQuilt = false;
+
+  rw->SetOffScreenRendering(prevOffScreenRendering);
 
   vtkNew<vtkPNGWriter> writer;
   writer->SetFileName(fileName);
@@ -930,9 +944,12 @@ void vtkLookingGlassInterface::WriteQuiltMovieFrame()
   // vtkWindowToImageFilter::SetScale() doesn't seem to do what we want...
   int prevDisplaySize[2] = { this->DisplaySize[0], this->DisplaySize[1] };
 
-  this->DisplaySize[0] = this->QuiltTiles[0] * this->RenderSize[0];
-  this->DisplaySize[1] = this->QuiltTiles[1] * this->RenderSize[1];
+  this->DisplaySize[0] = this->QuiltSize[0];
+  this->DisplaySize[1] = this->QuiltSize[1];
   rw->SetSize(this->DisplaySize);
+
+  auto prevOffScreenRendering = rw->GetOffScreenRendering();
+  rw->OffScreenRenderingOn();
 
   // Render once while saving the quilt. This will render the quilt image
   // on the render window. Then we will write out the image.
@@ -941,6 +958,8 @@ void vtkLookingGlassInterface::WriteQuiltMovieFrame()
   this->SavingQuilt = true;
   rw->Render();
   this->SavingQuilt = false;
+
+  rw->SetOffScreenRendering(prevOffScreenRendering);
 
   filter->Modified();
   writer->Write();
