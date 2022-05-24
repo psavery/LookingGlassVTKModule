@@ -189,6 +189,12 @@ vtkLookingGlassInterface::~vtkLookingGlassInterface()
     this->MovieWriter = nullptr;
   }
 
+  if (this->WriteMovieFrameObserver != nullptr)
+  {
+    this->WriteMovieFrameObserver->Delete();
+    this->WriteMovieFrameObserver = nullptr;
+  }
+
   // must tear down the message pipe before shut down the app
   if (this->Connected)
   {
@@ -509,6 +515,8 @@ void vtkLookingGlassInterface::DrawLightField(vtkOpenGLRenderWindow* renWin)
 void vtkLookingGlassInterface::DrawLightFieldInternal(
   vtkOpenGLRenderWindow* renWin, vtkTextureObject* tex)
 {
+  std::cout << "DrawLightFieldInternal() being ran...\n";
+
   // Simple default vertex and fragment shaders
   static const std::string defaultVS =
     R"***(
@@ -729,8 +737,11 @@ void vtkLookingGlassInterface::RenderQuilt(vtkOpenGLRenderWindow* rw,
     // avoid re-rendering the quilt, and instead skip straight to the
     // DrawLightField() function. Return here to avoid re-rendering the
     // quilt.
+    std::cout << "RenderQuilt() exit early...\n";
     return;
   }
+
+  std::cout << "RenderQuilt() being ran...\n";
 
   if (!renderers)
   {
@@ -838,12 +849,6 @@ void vtkLookingGlassInterface::RenderQuilt(vtkOpenGLRenderWindow* rw,
   }
   ostate->PopFramebufferBindings();
 
-  if (this->IsRecording)
-  {
-    // Write out a movie frame if we are recording
-    this->WriteQuiltMovieFrame();
-  }
-
   // restore the original camera settings
   int count = 0;
   for (renderers->InitTraversal(rsit); aren = renderers->GetNextRenderer(rsit); ++count)
@@ -860,26 +865,24 @@ void vtkLookingGlassInterface::SaveQuilt(vtkOpenGLRenderWindow* rw, const char* 
   filter->ShouldRerenderOff();
   filter->SetInput(rw);
 
-  // Increase magnification to produce higher resolution images
-  // vtkWindowToImageFilter::SetScale() doesn't seem to do what we want...
+  // Increase the size of the display to the quilt size
   int prevDisplaySize[2] = { this->DisplaySize[0], this->DisplaySize[1] };
 
   this->DisplaySize[0] = this->QuiltSize[0];
   this->DisplaySize[1] = this->QuiltSize[1];
   rw->SetSize(this->DisplaySize);
 
-  auto prevOffScreenRendering = rw->GetOffScreenRendering();
-  rw->OffScreenRenderingOn();
+  auto prevUseOffScreenBuffers = rw->GetUseOffScreenBuffers();
+  rw->UseOffScreenBuffersOn();
 
-  // Render once while saving the quilt. This will render the quilt image
-  // on the render window. Then we will write out the image.
-  // In ParaView, this will perform only the quad render via calling
-  // DrawLightField(). It will not re-render the quilt images.
+  // Render once while saving the quilt. The RenderQuilt() function will
+  // exit early, causing this to essentially call DrawLightField() with the
+  // quilt frame buffer.
   this->SavingQuilt = true;
   rw->Render();
   this->SavingQuilt = false;
 
-  rw->SetOffScreenRendering(prevOffScreenRendering);
+  rw->SetUseOffScreenBuffers(prevUseOffScreenBuffers);
 
   vtkNew<vtkPNGWriter> writer;
   writer->SetFileName(fileName);
@@ -894,6 +897,29 @@ void vtkLookingGlassInterface::SaveQuilt(vtkOpenGLRenderWindow* rw, const char* 
   // Render again for the correct LG display.
   rw->Render();
 }
+
+class vtkWriteMovieFrameObserver : public vtkCommand
+{
+public:
+  static vtkWriteMovieFrameObserver* New() { return new vtkWriteMovieFrameObserver; }
+
+  void Execute(vtkObject* vtkNotUsed(caller), unsigned long vtkNotUsed(event),
+    void* vtkNotUsed(calldata)) override
+  {
+    if (!this->Interface)
+    {
+      return;
+    }
+
+    this->Interface->WriteQuiltMovieFrame();
+  }
+
+  vtkLookingGlassInterface* Interface = nullptr;
+
+protected:
+  vtkWriteMovieFrameObserver() {}
+  ~vtkWriteMovieFrameObserver() override {}
+};
 
 void vtkLookingGlassInterface::StartRecordingQuilt(vtkOpenGLRenderWindow* rw, const char* fileName)
 {
@@ -916,6 +942,14 @@ void vtkLookingGlassInterface::StartRecordingQuilt(vtkOpenGLRenderWindow* rw, co
     this->MovieWriter = MovieWriterClass::New();
   }
 
+  if (!this->WriteMovieFrameObserver)
+  {
+    auto* observer = vtkWriteMovieFrameObserver::New();
+    observer->Interface = this;
+    rw->AddObserver(vtkCommand::EndEvent, observer);
+    this->WriteMovieFrameObserver = observer;
+  }
+
   auto filter = this->MovieWindowToImageFilter;
   auto writer = this->MovieWriter;
 
@@ -931,6 +965,12 @@ void vtkLookingGlassInterface::StartRecordingQuilt(vtkOpenGLRenderWindow* rw, co
 
 void vtkLookingGlassInterface::WriteQuiltMovieFrame()
 {
+  if (this->SavingQuilt)
+  {
+    // Avoid infinite recursion
+    return;
+  }
+
   if (!this->IsRecording)
   {
     return;
@@ -940,26 +980,28 @@ void vtkLookingGlassInterface::WriteQuiltMovieFrame()
   auto writer = this->MovieWriter;
   auto rw = filter->GetInput();
 
-  // Increase magnification to produce higher resolution images
-  // vtkWindowToImageFilter::SetScale() doesn't seem to do what we want...
+  // Increase the size of the display to the quilt size
   int prevDisplaySize[2] = { this->DisplaySize[0], this->DisplaySize[1] };
-
   this->DisplaySize[0] = this->QuiltSize[0];
   this->DisplaySize[1] = this->QuiltSize[1];
   rw->SetSize(this->DisplaySize);
 
-  auto prevOffScreenRendering = rw->GetOffScreenRendering();
-  rw->OffScreenRenderingOn();
+  auto prevUseOffScreenBuffers = rw->GetUseOffScreenBuffers();
+  rw->UseOffScreenBuffersOn();
 
-  // Render once while saving the quilt. This will render the quilt image
-  // on the render window. Then we will write out the image.
-  // In ParaView, this will perform only the quad render via calling
-  // DrawLightField(). It will not re-render the quilt images.
+  // std::cout << "About to call rerender on this window: ";
+  // rw->PrintSelf(std::cout, vtkIndent(2));
+
+  // Render once while saving the quilt. The RenderQuilt() function will
+  // exit early, causing this to essentially call DrawLightField() with the
+  // quilt frame buffer.
   this->SavingQuilt = true;
+  std::cout << "Right before render...\n";
   rw->Render();
+  std::cout << "Right after render...\n";
   this->SavingQuilt = false;
 
-  rw->SetOffScreenRendering(prevOffScreenRendering);
+  rw->SetUseOffScreenBuffers(prevUseOffScreenBuffers);
 
   filter->Modified();
   writer->Write();

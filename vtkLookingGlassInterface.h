@@ -338,6 +338,8 @@ protected:
 
   void DrawLightFieldInternal(vtkOpenGLRenderWindow* renWin, vtkTextureObject* tex);
 
+  vtkCommand* WriteMovieFrameObserver;
+
 private:
   vtkLookingGlassInterface(const vtkLookingGlassInterface&) = delete;
   void operator=(const vtkLookingGlassInterface&) = delete;

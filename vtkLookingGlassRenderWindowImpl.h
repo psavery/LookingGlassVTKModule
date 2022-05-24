@@ -50,6 +50,8 @@ void className::ReleaseGraphicsResources(vtkWindow* renWin)
 // display then render the resulting lightfield to the window
 void className::DoStereoRender()
 {
+  std::cout << "About to do stereo render!\n";
+
   this->StereoUpdate();
 
   int renderSize[2];

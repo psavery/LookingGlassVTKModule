@@ -19,6 +19,7 @@
 #include "vtkLookingGlassPass.h"
 #include "vtkNew.h"
 #include "vtkOpenGLRenderer.h"
+#include "vtkOpenGLRenderWindow.h"
 #include "vtkPLYReader.h"
 #include "vtkPolyDataMapper.h"
 #include "vtkProperty.h"
@@ -123,10 +124,19 @@ int TestLookingGlassPass(int argc, char* argv[])
   renderWindow->Render();
 
   int retVal = vtkRegressionTestImageThreshold(renderWindow, 15);
+
+  auto* orw = vtkOpenGLRenderWindow::SafeDownCast(renderWindow);
+  auto* interface = lgpass->GetInterface();
+
+  // interface->SaveQuilt(orw, "example.png");
+  interface->StartRecordingQuilt(orw, "example.ogv");
+
   if (retVal == vtkRegressionTester::DO_INTERACTOR)
   {
     iren->Start();
   }
+
+  interface->StopRecordingQuilt();
 
   return !retVal;
 }
