@@ -105,10 +105,15 @@ vtkOpenGLRenderWindow* vtkLookingGlassInterface::CreateLookingGlassRenderWindow(
   auto renWin = vtkXLookingGlassRenderWindow::New();
 #endif
 #ifdef VTK_USE_COCOA
+  // FIXME: debug
+  failtocompile
   auto renWin = vtkCocoaLookingGlassRenderWindow::New();
 #endif
 
+#ifndef VTK_USE_COCOA
+  // FIXME: why is this failing for mac wheels?
   renWin->SetLGDeviceIndex(deviceIndex);
+#endif
 
   return renWin;
 }
